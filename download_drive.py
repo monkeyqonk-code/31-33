@@ -7,8 +7,6 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-
-# Filter target akun yang ingin didownload saja
 TARGET_AKUN = ['akun-31', 'akun-32', 'akun-33']
 
 def main():
@@ -30,16 +28,12 @@ def main():
     ).execute()
 
     files = results.get('files', [])
-    print(f"Total file zip di Drive: {len(files)}")
+    print(f"Total file zip ditemukan di Drive: {len(files)}")
 
-    if not files:
-        print("PERINGATAN: Tidak ada file zip yang ditemukan!")
-        return
-
+    downloaded = False
     for file in files:
         f_id = file['id']
         f_name = file['name']
-        
         
         if any(target in f_name for target in TARGET_AKUN):
             print(f"--> Mengunduh target: {f_name} (ID: {f_id})...")
@@ -57,10 +51,12 @@ def main():
                 with zipfile.ZipFile(fh, 'r') as zip_ref:
                     zip_ref.extractall('.')
                 print(f"--> BERHASIL EKSTRAK: {f_name}\n")
+                downloaded = True
             except Exception as e:
                 print(f"--> GAGAL EKSTRAK {f_name}: {e}\n")
-        else:
-            print(f"--> Melewati {f_name} (Bukan target repository ini)\n")
+
+    if not downloaded:
+        print("[!] PERINGATAN BOHONG/KOSONG: Tidak ada ZIP matching TARGET_AKUN yang berhasil diunduh!")
 
 if __name__ == '__main__':
     main()
