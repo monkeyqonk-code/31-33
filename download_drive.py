@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-TARGET_AKUN = ['akun-31', 'akun-32', 'akun-33']
+TARGET_AKUN = ['akun-31', 'akun-32', 'akun-33', 'akun-34', 'akun-35', 'akun-36']
 
 def main():
     sa_key_info = os.environ.get('GCP_SA_KEY')
