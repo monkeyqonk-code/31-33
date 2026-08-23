@@ -8,6 +8,7 @@ on:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
@@ -41,18 +42,22 @@ jobs:
     - name: Run All Subfolder Bots In Parallel
       run: |
         python -c "
-        import os, subprocess
+        import os, subprocess, time
 
         target = '${{ matrix.target }}'
         processes = []
 
-        if os.path.exists(target):
-            for root, dirs, files in os.walk(target):
-                if 'seofast_zhp.py' in files:
-                    print(f'==> Jalankan Loop Bot: {root}')
-                    p = subprocess.Popen(['python3', 'seofast_zhp.py'], cwd=root)
-                    processes.append(p)
+        # Mencari folder target secara fleksibel di mana saja
+        for root, dirs, files in os.walk('.'):
+            if target in root and 'seofast_zhp.py' in files:
+                print(f'==> Launching Bot Subfolder: {root}')
+                
+                # Auto-restart loop jika bot crash / exit internal
+                cmd = f'until python3 seofast_zhp.py; do echo \"[!] Bot crash, restart dalam 5 detik...\"; sleep 5; done'
+                p = subprocess.Popen(cmd, shell=True, executable='/bin/bash', cwd=root)
+                processes.append(p)
 
+        if processes:
             for p in processes:
                 p.wait()
         else:
