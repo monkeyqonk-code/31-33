@@ -1,0 +1,313 @@
+name: "juhpat2"
+
+on:
+  workflow_dispatch:
+
+# ============================================================
+# ANTRIAN WORKFLOW
+# ============================================================
+concurrency:
+  group: um2-workflow-queue
+  cancel-in-progress: false
+  queue: max
+
+# ============================================================
+# JOBS
+# ============================================================
+
+jobs:
+
+  run:
+
+    runs-on: ubuntu-latest
+
+    # ========================================================
+    # MATRIX TARGET
+    # ========================================================
+
+    strategy:
+
+      fail-fast: false
+
+      matrix:
+
+        target:
+          - '1b'
+          - '2b'
+          - '3b'
+          - '4b'
+          - '5b'
+          - '6b'
+          - '7b'
+          - '8b'
+          - '9b'
+          - '10b'
+          - '11b'
+          - '12b'
+          - '13b'
+          - '14b'
+          - '15b'
+          - '16b'
+          - '17b'
+          - '18b'
+          - '19b'
+          - '20b'
+
+    steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
+      - name: Checkout Repository
+
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # PYTHON
+      # ============================================================
+
+      - name: Set up Python
+
+        uses: actions/setup-python@v5
+
+        with:
+          python-version: '3.10'
+
+      # ============================================================
+      # INSTALL SYSTEM PACKAGES
+      # ============================================================
+
+      - name: Install Google Chrome & Rclone System
+
+        run: |
+
+          set -e
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            wget \
+            curl \
+            rclone \
+            fuse3
+
+          if ! command -v google-chrome >/dev/null 2>&1; then
+            wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+          fi
+
+          sudo rm -f /usr/bin/chromedriver
+
+          google-chrome --version || true
+          rclone version
+
+      # ============================================================
+      # PYTHON PACKAGES
+      # ============================================================
+
+      - name: Install Python Packages
+
+        run: |
+
+          set -e
+
+          python -m pip install --upgrade pip
+
+          pip install \
+            requests \
+            selenium \
+            selenium-stealth \
+            colorama \
+            certifi \
+            urllib3
+
+      # ============================================================
+      # SETUP RCLONE GOOGLE DRIVE
+      # ============================================================
+
+      - name: Setup Rclone Google Drive
+
+        env:
+          RAW_GCP_KEY: ${{ secrets.GCP_SA_KEY }}
+          RAW_DRIVE_ID: ${{ secrets.DRIVE_FILE_ID }}
+
+        run: |
+
+          set -e
+          mkdir -p /home/runner/.config/rclone
+          printf '%s' "$RAW_GCP_KEY" | base64 -w 0 > /tmp/sa_b64.txt
+
+          python3 <<'PYTHON'
+          import base64, json, os, re, sys
+          with open("/tmp/sa_b64.txt", "r", encoding="utf-8") as f:
+              b64_str = f.read().strip()
+          raw_json_bytes = base64.b64decode(b64_str)
+          raw_json_str = raw_json_bytes.decode("utf-8")
+          try:
+              data = json.loads(raw_json_str)
+          except:
+              data = json.loads(raw_json_str.replace("\\\\n", "\\n"))
+          if "\\n" in data["private_key"]:
+              data["private_key"] = data["private_key"].replace("\\n", "\n")
+          sa_path = "/home/runner/.config/rclone/sa.json"
+          with open(sa_path, "w", encoding="utf-8") as f:
+              json.dump(data, f, indent=2)
+
+          raw_id = os.environ.get("RAW_DRIVE_ID", "").strip()
+          if "/folders/" in raw_id:
+              clean_id = raw_id.split("/folders/", 1)[1].split("?", 1)[0].split("/", 1)[0]
+          elif "id=" in raw_id:
+              match = re.search(r"[?&]id=([^&]+)", raw_id)
+              clean_id = match.group(1) if match else raw_id
+          else:
+              clean_id = raw_id.split("?", 1)[0].rstrip("/")
+
+          rclone_conf = f"""[gdrive]
+          type = drive
+          scope = drive
+          service_account_file = {sa_path}
+          root_folder_id = {clean_id}
+          """
+          with open("/home/runner/.config/rclone/rclone.conf", "w", encoding="utf-8") as f:
+              f.write(rclone_conf)
+          print("[+] Rclone config OK")
+          PYTHON
+
+          chmod 600 /home/runner/.config/rclone/sa.json
+          chmod 600 /home/runner/.config/rclone/rclone.conf
+          rclone listremotes
+          rclone lsd gdrive: --max-depth 1
+
+      # ============================================================
+      # MOUNT GOOGLE DRIVE
+      # ============================================================
+
+      - name: Mount Folder SF
+
+        run: |
+          set -e
+          mkdir -p ./drive_sf
+          rclone mount gdrive: ./drive_sf --vfs-cache-mode writes --vfs-cache-max-size 2G --dir-cache-time 5m --poll-interval 30s --daemon
+          sleep 5
+          if mountpoint -q ./drive_sf; then
+            echo "[+] Google Drive berhasil di-mount"
+          else
+            echo "[!] ERROR: Google Drive gagal di-mount!"
+            exit 1
+          fi
+
+      # ============================================================
+      # RUN BOTS (DENGAN TIMEOUT 350 MENIT / 5 JAM 50 MENIT)
+      # ============================================================
+
+      - name: Run All Subfolder Bots In Parallel (Timeout 5h 50m)
+
+        run: |
+
+          set +e
+
+          # Jalankan timeout 350 menit (5 jam 50 menit). Exit code 124 menandakan timeout tercapai.
+          timeout 350m python3 <<'PYTHON'
+          import os
+          import signal
+          import subprocess
+          import sys
+          import time
+
+          def handle_sigterm(signum, frame):
+              print("[+] Batas waktu 350 menit tercapai. Menghentikan semua bot secara halus...")
+              raise KeyboardInterrupt
+          signal.signal(signal.SIGTERM, handle_sigterm)
+
+          target = "${{ matrix.target }}"
+          target_dir = os.path.join("./drive_sf", target)
+
+          print("=" * 60)
+          print(f"TARGET MATRIX : {target}")
+          print(f"TARGET FOLDER : {target_dir}")
+          print("=" * 60)
+
+          processes = []
+
+          def run_bot_loop(bot_dir):
+              cmd = (
+                  "while true; do "
+                  "python3 sm.py; "
+                  "EXIT_CODE=$?; "
+                  f'echo "[!] Bot di {bot_dir} berhenti dengan code $EXIT_CODE"; '
+                  'echo "[!] Restart dalam 5 detik..."; '
+                  "sleep 5; "
+                  "done"
+              )
+              process = subprocess.Popen(
+                  cmd,
+                  shell=True,
+                  cwd=bot_dir,
+                  executable="/bin/bash",
+                  start_new_session=True
+              )
+              return process
+
+          if not os.path.exists(target_dir):
+              print(f"[!] ERROR: Folder {target_dir} tidak ditemukan di Google Drive!")
+              sys.exit(1)
+
+          for root, dirs, files in os.walk(target_dir):
+              if "sm.py" in files:
+                  print(f"==> Menjalankan Bot Real-time di: {root}")
+                  process = run_bot_loop(root)
+                  processes.append(process)
+
+          if not processes:
+              print(f"[!] ERROR: Tidak ditemukan sm.py di dalam {target_dir}")
+              sys.exit(1)
+
+          print(f"\n[+] Total bot berjalan: {len(processes)}\n")
+
+          try:
+              while True:
+                  alive_count = 0
+                  for process in processes:
+                      if process.poll() is None:
+                          alive_count += 1
+                  if alive_count == 0:
+                      print("[!] Semua bot process berhenti!")
+                      break
+                  time.sleep(60)
+          except KeyboardInterrupt:
+              print("[!] Workflow dihentikan / Timeout 350 menit tercapai.")
+
+          print("\n" + "=" * 60)
+          print("[+] Menghentikan semua bot dengan bersih...")
+          print("=" * 60)
+
+          for process in processes:
+              try:
+                  if process.poll() is None:
+                      os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+              except Exception as e:
+                  print(f"[!] Gagal TERM process {process.pid}: {e}")
+
+          time.sleep(5)
+
+          for process in processes:
+              try:
+                  if process.poll() is None:
+                      os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+              except Exception as e:
+                  print(f"[!] Gagal KILL process {process.pid}: {e}")
+
+          print("\n[+] Semua bot sudah dihentikan dengan sukses.")
+          PYTHON
+
+          EXIT_CODE=$?
+          echo "Python exit code: $EXIT_CODE"
+
+          # Jika exit code 124 (artinya timeout 350m tercapai), anggap sukses (exit 0) agar workflow hijau
+          if [ $EXIT_CODE -eq 124 ]; then
+            echo "[+] Batas waktu 5 jam 50 menit selesai dengan sukses. Workflow ditutup dengan status Success (Hijau)."
+            exit 0
+          else
+            exit $EXIT_CODE
+          fi
