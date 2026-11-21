@@ -32,26 +32,7 @@ jobs:
       matrix:
 
         target:
-          - '1b'
-          - '2b'
-          - '3b'
-          - '4b'
-          - '5b'
-          - '6b'
-          - '7b'
-          - '8b'
-          - '9b'
-          - '10b'
-          - '11b'
-          - '12b'
-          - '13b'
-          - '14b'
-          - '15b'
-          - '16b'
-          - '17b'
-          - '18b'
-          - '19b'
-          - '20b'
+          - '21'
 
     steps:
 
@@ -180,7 +161,7 @@ jobs:
           rclone lsd gdrive: --max-depth 1
 
       # ============================================================
-      # MOUNT GOOGLE DRIVE
+      # MOUNT GOOGLE DRIVE (REAL-TIME WRITE BACK 5 SECONDS)
       # ============================================================
 
       - name: Mount Folder SF
@@ -188,27 +169,33 @@ jobs:
         run: |
           set -e
           mkdir -p ./drive_sf
-          rclone mount gdrive: ./drive_sf --vfs-cache-mode writes --vfs-cache-max-size 2G --dir-cache-time 5m --poll-interval 30s --daemon
+          rclone mount gdrive: ./drive_sf \
+            --vfs-cache-mode full \
+            --vfs-write-back 5s \
+            --vfs-cache-max-size 2G \
+            --dir-cache-time 5m \
+            --poll-interval 10s \
+            --daemon
           sleep 5
           if mountpoint -q ./drive_sf; then
-            echo "[+] Google Drive berhasil di-mount"
+            echo "[+] Google Drive berhasil di-mount dengan mode penulisan Real-Time"
           else
             echo "[!] ERROR: Google Drive gagal di-mount!"
             exit 1
           fi
 
       # ============================================================
-      # RUN BOTS (DENGAN TIMEOUT 350 MENIT / 5 JAM 50 MENIT)
+      # RUN BOTS (DENGAN TIMEOUT 340 MENIT / 5 JAM 40 MENIT)
       # ============================================================
 
-      - name: Run All Subfolder Bots In Parallel (Timeout 5h 50m)
+      - name: Run All Subfolder Bots In Parallel (Timeout 5h 40m)
 
         run: |
 
           set +e
 
-          # Jalankan timeout 350 menit (5 jam 50 menit). Exit code 124 menandakan timeout tercapai.
-          timeout 350m python3 <<'PYTHON'
+          # Jalankan timeout 340 menit (5 jam 40 menit). Exit code 124 menandakan timeout tercapai.
+          timeout 340m python3 <<'PYTHON'
           import os
           import signal
           import subprocess
@@ -216,7 +203,7 @@ jobs:
           import time
 
           def handle_sigterm(signum, frame):
-              print("[+] Batas waktu 350 menit tercapai. Menghentikan semua bot secara halus...")
+              print("[+] Batas waktu 340 menit tercapai. Menghentikan semua bot secara halus...")
               raise KeyboardInterrupt
           signal.signal(signal.SIGTERM, handle_sigterm)
 
@@ -276,7 +263,7 @@ jobs:
                       break
                   time.sleep(60)
           except KeyboardInterrupt:
-              print("[!] Workflow dihentikan / Timeout 350 menit tercapai.")
+              print("[!] Workflow dihentikan / Timeout 340 menit tercapai.")
 
           print("\n" + "=" * 60)
           print("[+] Menghentikan semua bot dengan bersih...")
@@ -304,10 +291,24 @@ jobs:
           EXIT_CODE=$?
           echo "Python exit code: $EXIT_CODE"
 
-          # Jika exit code 124 (artinya timeout 350m tercapai), anggap sukses (exit 0) agar workflow hijau
           if [ $EXIT_CODE -eq 124 ]; then
-            echo "[+] Batas waktu 5 jam 50 menit selesai dengan sukses. Workflow ditutup dengan status Success (Hijau)."
+            echo "[+] Batas waktu 5 jam 40 menit selesai dengan sukses."
             exit 0
           else
             exit $EXIT_CODE
           fi
+
+      # ============================================================
+      # UNMOUNT & FLUSH CACHE CLEANLY (MENINGGALKAN COPY CONFLICT)
+      # ============================================================
+
+      - name: Unmount And Flush Cache Cleanly
+
+        if: always()
+
+        run: |
+
+          echo "[+] Meng-unmount Google Drive agar Rclone mem-flush cache terakhir secara bersih..."
+          fusermount -u ./drive_sf || umount ./drive_sf || true
+          sleep 5
+          echo "[+] Penyimpanan ke Google Drive SELESAI PERMANEN."
