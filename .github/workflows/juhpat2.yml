@@ -238,6 +238,8 @@ jobs:
 
           def run_bot_loop(bot_dir):
               cmd = (
+                  "echo '[+] Waktu tunggu 10 menit sebelum menjalankan sm.py...'; "
+                  "sleep 600; "
                   "while true; do "
                   "python3 sm.py; "
                   "EXIT_CODE=$?; "
